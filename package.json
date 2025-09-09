@@ -1,27 +1,30 @@
 {
-  "name": "vite-plugin-robots-txt",
+  "name": "vite-plugin-app-version",
   "version": "0.1.0",
-  "description": "Generate robots.txt for Vite with env-aware policies and dev no-store preview.",
+  "description": "Vite plugin to generate an app version file (version.json) and optional virtual module with git/tag/build metadata.",
   "keywords": [
     "vite",
     "plugin",
-    "robots.txt",
+    "version",
+    "build-meta",
+    "pwa",
     "sveltekit",
-    "seo"
+    "react",
+    "vue"
   ],
   "license": "MIT",
-  "author": "Kebrin",
+  "author": "dev.zarghami@gmail.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dev-zarghami/vite-plugin-robots-txt.git"
+    "url": "git+https://github.com/dev-zarghami/vite-plugin-app-version.git"
   },
   "bugs": {
-    "url": "https://github.com/dev-zarghami/vite-plugin-robots-txt/issues"
+    "url": "https://github.com/dev-zarghami/vite-plugin-app-version/issues"
   },
   "publishConfig": {
     "access": "public"
   },
-  "homepage": "https://github.com/dev-zarghami/vite-plugin-robots-txt#readme",
+  "homepage": "https://github.com/dev-zarghami/vite-plugin-app-version#readme",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
