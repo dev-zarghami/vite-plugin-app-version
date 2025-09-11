@@ -14,12 +14,9 @@ type FullInfo = {
 };
 
 type Options = {
-    outputDir?: string,
-    /** Output filename served at BASE/<filename>. Default: "version.json" */
-    filename?: string;
-    /** Which fields to expose publicly (JSON + virtual module) */
+    outputDir?: string;
+    filename?: string; // default "version.json"
     publicFields?: (keyof FullInfo)[];
-    /** Expose a virtual module you can import in-app. Default: true → 'virtual:app-version' */
     exposeVirtual?: boolean | { id?: string };
 };
 
@@ -61,6 +58,20 @@ function weakEtagFor(s: string) {
     return `W/"${h}"`;
 }
 
+// Map field types for dynamic interface generation
+const fieldTypes: Record<keyof FullInfo, string> = {
+    version: "string",
+    commitShort: "string | null",
+    pkgVersion: "string | null",
+    buildTime: "string",
+    mode: "string",
+};
+
+function generateAppVersionInterface(fields: (keyof FullInfo)[]): string {
+    const lines = fields.map(f => `  ${f}: ${fieldTypes[f]};`);
+    return `interface AppVersion {\n${lines.join("\n")}\n}`;
+}
+
 export function generateVersion(opts: Options = {}): Plugin {
     const log = createLogger("version");
     const filename = opts.filename ?? "version.json";
@@ -68,16 +79,16 @@ export function generateVersion(opts: Options = {}): Plugin {
     const publicFields = opts.publicFields ?? defaultFields;
 
     const exposeVirtualEnabled = opts.exposeVirtual ?? true;
-    const virtualId = typeof exposeVirtualEnabled === "object" && exposeVirtualEnabled?.id
-        ? exposeVirtualEnabled.id
-        : "virtual:app-version";
+    const virtualId =
+        typeof exposeVirtualEnabled === "object" && exposeVirtualEnabled?.id
+            ? exposeVirtualEnabled.id
+            : "virtual:app-version";
 
     let outDir = opts.outputDir || "static";
     let mode: "development" | "production" = "production";
     let command: "serve" | "build" = "build";
     let resolvedConfig: ResolvedConfig;
 
-    // cache last built JSON for dev serve & virtual module
     let lastJson = "{}\n";
 
     const buildJson = () => {
@@ -100,23 +111,34 @@ export function generateVersion(opts: Options = {}): Plugin {
         },
 
         buildStart() {
-            // generate once so virtual module is available early, and so buildEnd has content
             buildJson();
         },
 
         buildEnd() {
-            // emit file into build outDir
             try {
                 const json = buildJson();
                 const filePath = resolveOutputPath(outDir, filename);
                 writeFileIfChanged(filePath, json, log);
                 log.info("version file written", {file: filePath});
+
+                if (exposeVirtualEnabled) {
+                    const interfaceCode = generateAppVersionInterface(publicFields);
+                    const dtsContent = `
+declare module "${virtualId}" {
+${interfaceCode}
+  const version: AppVersion;
+  export default version;
+}
+`;
+                    const outDtsPath = path.resolve(outDir, "virtual-app-version.d.ts");
+                    fs.writeFileSync(outDtsPath, dtsContent, "utf-8");
+                    log.info("TypeScript declaration for virtual module written", {file: outDtsPath});
+                }
             } catch (e: any) {
-                log.warn("failed to write version file", {err: e?.message || String(e)});
+                log.warn("failed to write version file or d.ts", {err: e?.message || String(e)});
             }
         },
 
-        // Dev: serve JSON at base-aware route with ETag/no-store
         configureServer(server) {
             const base = (resolvedConfig?.base ?? "/").replace(/\/+$/, "/");
             const route = path.posix.join(base, filename);
@@ -149,7 +171,6 @@ export function generateVersion(opts: Options = {}): Plugin {
             log.info(`dev route mounted → ${route} (no-store)`);
         },
 
-        // Optional: expose a virtual module you can import in your app code.
         resolveId(id) {
             if (!exposeVirtualEnabled) return null;
             if (id === virtualId) return virtualId;
@@ -157,13 +178,11 @@ export function generateVersion(opts: Options = {}): Plugin {
         },
 
         load(id) {
-            if (!exposeVirtualEnabled) return null;
-            if (id !== virtualId) return null;
+            if (!exposeVirtualEnabled || id !== virtualId) return null;
 
-            // Always (re)build to reflect current time/mode in dev
             const json = command === "serve" ? buildJson() : lastJson;
 
-            // export default <object>
+            // Return proper JS module for Vite
             return {
                 code: `export default ${json};`,
                 map: null,
