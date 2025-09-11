@@ -5,7 +5,7 @@
 
 > Vite plugin to generate an **app version file (`version.json`)** and an optional **virtual module** with git/tag/build
 > metadata.  
-> Useful for displaying build info in your app, cache busting, or debugging.
+> Useful for displaying build info in your app, cache busting, or runtime version checking.
 
 ---
 
@@ -15,6 +15,7 @@
 - Serves `version.json` in **dev mode** with `Cache-Control: no-store` + ETag
 - Provides a virtual module (`virtual:app-version`) you can import in-app
 - **Dynamic TypeScript interface** for virtual module, matching `publicFields`
+- Exported async function `checkVersion()` to detect runtime version updates
 - Includes `pkgVersion`, `git tag/commit`, `buildTime`, and current `mode`
 - Customizable public fields
 - No external runtime dependency
@@ -55,7 +56,7 @@ export default defineConfig({
 ### In your app (frontend code)
 
 ```ts
-import version from "virtual:app-version";
+import version, {checkVersion} from "virtual:app-version";
 
 console.log("App version info:", version);
 // Example output based on publicFields:
@@ -65,6 +66,14 @@ console.log("App version info:", version);
 //   commitShort: "abc1234",
 //   buildTime: "2025-09-09T14:00:00.000Z"
 // }
+
+// Check for runtime updates
+setInterval(async () => {
+    const {updated, latest} = await checkVersion();
+    if (updated) {
+        alert(`New app version detected: ${latest?.version}`);
+    }
+}, 30000); // check every 30 seconds
 ```
 
 - The **TypeScript interface** `AppVersion` automatically matches the fields you expose via `publicFields`.
@@ -89,13 +98,14 @@ Example content:
 
 ## ⚙️ Options
 
-| Option             | Type                        | Default                                              | Description                                         |
-|--------------------|-----------------------------|------------------------------------------------------|-----------------------------------------------------|
-| `filename`         | `string`                    | `"version.json"`                                     | Output file name                                    |
-| `outputDir`        | `string`                    | `"dist"`                                             | Directory to emit JSON / virtual module declaration |
-| `publicFields`     | `(keyof FullInfo)[]`        | `["pkgVersion","version","commitShort","buildTime"]` | Fields to expose in JSON and virtual module         |
-| `exposeVirtual`    | `boolean \| { id: string }` | `true`                                               | Export a virtual module                             |
-| `exposeVirtual.id` | `string`                    | `"virtual:app-version"`                              | Custom virtual import ID                            |
+| Option                 | Type                                         | Default                                              | Description                                         |
+|------------------------|----------------------------------------------|------------------------------------------------------|-----------------------------------------------------|
+| `filename`             | `string`                                     | `"version.json"`                                     | Output file name                                    |
+| `outputDir`            | `string`                                     | `"dist"`                                             | Directory to emit JSON / virtual module declaration |
+| `publicFields`         | `(keyof FullInfo)[]`                         | `["pkgVersion","version","commitShort","buildTime"]` | Fields to expose in JSON and virtual module         |
+| `exposeVirtual`        | `boolean \| { id: string; dtsDir?: string }` | `true`                                               | Export a virtual module                             |
+| `exposeVirtual.id`     | `string`                                     | `"virtual:app-version"`                              | Custom virtual import ID                            |
+| `exposeVirtual.dtsDir` | `string`                                     | `"src/types"`                                        | Path to write TypeScript declaration                |
 
 ### FullInfo fields
 
@@ -124,9 +134,14 @@ generateVersion({
 ```
 
 ```ts
-import info from "virtual:my-build-info";
+import info, {checkVersion} from "virtual:my-build-info";
 
 console.log(info.buildTime); // TS autocomplete works
+
+// Runtime version check
+checkVersion().then(({updated, latest}) => {
+    if (updated) console.log("New version available:", latest?.version);
+});
 ```
 
 - The generated `AppVersion` interface will only contain `version` and `buildTime`.
@@ -142,4 +157,4 @@ PRs and issues welcome!
 
 ## 📄 License
 
-[MIT](LICENSE) © dev.zarghami
+[MIT](LICENSE) © dev-zarghami

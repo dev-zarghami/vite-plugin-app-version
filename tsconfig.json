@@ -4,6 +4,11 @@
     "lib": [
       "ES2022"
     ],
+    "typeRoots": [
+      "./node_modules/@types",
+      "./types",
+      "./src/types"
+    ],
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "types": [

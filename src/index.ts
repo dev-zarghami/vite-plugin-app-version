@@ -5,21 +5,33 @@ import crypto from "node:crypto";
 import type {Plugin, ResolvedConfig} from "vite";
 import {NOW_ISO, createLogger, resolveOutputPath, writeFileIfChanged, runCommand} from "./helper";
 
+/**
+ * Full information about the app version
+ */
 type FullInfo = {
-    version: string;
+    version: string;         // Git tag, commit hash or timestamp
     commitShort: string | null;
-    pkgVersion: string | null;
-    buildTime: string;
-    mode: string;
+    pkgVersion: string | null; // package.json version
+    buildTime: string;       // ISO timestamp
+    mode: string;            // development | production
 };
 
+/**
+ * Plugin options
+ */
 type Options = {
-    outputDir?: string;
-    filename?: string; // default "version.json"
+    outputDir?: string;      // Where to write version.json
+    filename?: string;       // Default: "version.json"
     publicFields?: (keyof FullInfo)[];
-    exposeVirtual?: boolean | { id?: string };
+    exposeVirtual?: boolean | { id?: string; dtsDir?: string }; // virtual module + TS declaration path
 };
 
+// Default fields to expose in JSON & virtual module
+const defaultFields: (keyof FullInfo)[] = ["pkgVersion", "version", "commitShort", "buildTime"];
+
+/**
+ * Read package.json version
+ */
 function readPkgVersion(): string | null {
     try {
         const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"));
@@ -29,7 +41,10 @@ function readPkgVersion(): string | null {
     }
 }
 
-function collect(mode: string): FullInfo {
+/**
+ * Collect version info from Git / package.json / timestamp
+ */
+function collectVersion(mode: string): FullInfo {
     const version =
         runCommand("git describe --tags --exact-match") ||
         runCommand("git describe --tags --always") ||
@@ -47,18 +62,26 @@ function collect(mode: string): FullInfo {
     };
 }
 
-function pick<T extends Record<string, any>, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> {
+/**
+ * Pick only selected keys from object
+ */
+function pickFields<T extends Record<string, any>, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> {
     const out = {} as Pick<T, K>;
     for (const k of keys) out[k] = obj[k];
     return out;
 }
 
-function weakEtagFor(s: string) {
-    const h = crypto.createHash("sha1").update(s).digest("hex");
-    return `W/"${h}"`;
+/**
+ * Generate weak ETag for caching
+ */
+function weakEtagFor(content: string) {
+    const hash = crypto.createHash("sha1").update(content).digest("hex");
+    return `W/"${hash}"`;
 }
 
-// Map field types for dynamic interface generation
+/**
+ * Type mapping for generating TypeScript interface
+ */
 const fieldTypes: Record<keyof FullInfo, string> = {
     version: "string",
     commitShort: "string | null",
@@ -67,15 +90,21 @@ const fieldTypes: Record<keyof FullInfo, string> = {
     mode: "string",
 };
 
+/**
+ * Generate TypeScript interface code for selected fields
+ */
 function generateAppVersionInterface(fields: (keyof FullInfo)[]): string {
     const lines = fields.map(f => `  ${f}: ${fieldTypes[f]};`);
     return `interface AppVersion {\n${lines.join("\n")}\n}`;
 }
 
+/**
+ * Vite plugin: generate app version info
+ */
 export function generateVersion(opts: Options = {}): Plugin {
     const log = createLogger("version");
+
     const filename = opts.filename ?? "version.json";
-    const defaultFields: (keyof FullInfo)[] = ["pkgVersion", "version", "commitShort", "buildTime"];
     const publicFields = opts.publicFields ?? defaultFields;
 
     const exposeVirtualEnabled = opts.exposeVirtual ?? true;
@@ -84,6 +113,11 @@ export function generateVersion(opts: Options = {}): Plugin {
             ? exposeVirtualEnabled.id
             : "virtual:app-version";
 
+    const dtsDir =
+        typeof exposeVirtualEnabled === "object" && exposeVirtualEnabled?.dtsDir
+            ? exposeVirtualEnabled.dtsDir
+            : path.resolve(process.cwd(), "src/types"); // default TS declaration path
+
     let outDir = opts.outputDir || "static";
     let mode: "development" | "production" = "production";
     let command: "serve" | "build" = "build";
@@ -91,9 +125,12 @@ export function generateVersion(opts: Options = {}): Plugin {
 
     let lastJson = "{}\n";
 
+    /**
+     * Build JSON string for version info
+     */
     const buildJson = () => {
-        const full = collect(mode);
-        const data = pick(full, publicFields);
+        const full = collectVersion(mode);
+        const data = pickFields(full, publicFields);
         const json = JSON.stringify(data, null, 2) + "\n";
         lastJson = json;
         return json;
@@ -121,16 +158,21 @@ export function generateVersion(opts: Options = {}): Plugin {
                 writeFileIfChanged(filePath, json, log);
                 log.info("version file written", {file: filePath});
 
+                // Generate TS declaration file for virtual module
                 if (exposeVirtualEnabled) {
                     const interfaceCode = generateAppVersionInterface(publicFields);
+
+                    if (!fs.existsSync(dtsDir)) fs.mkdirSync(dtsDir, {recursive: true});
+
                     const dtsContent = `
 declare module "${virtualId}" {
 ${interfaceCode}
   const version: AppVersion;
+  export function checkVersion(): Promise<{ updated: boolean; latest: AppVersion | null }>;
   export default version;
 }
 `;
-                    const outDtsPath = path.resolve(outDir, "virtual-app-version.d.ts");
+                    const outDtsPath = path.resolve(dtsDir, "virtual-app-version.d.ts");
                     fs.writeFileSync(outDtsPath, dtsContent, "utf-8");
                     log.info("TypeScript declaration for virtual module written", {file: outDtsPath});
                 }
@@ -139,6 +181,9 @@ ${interfaceCode}
             }
         },
 
+        /**
+         * Serve version.json in dev server with proper caching headers
+         */
         configureServer(server) {
             const base = (resolvedConfig?.base ?? "/").replace(/\/+$/, "/");
             const route = path.posix.join(base, filename);
@@ -160,6 +205,7 @@ ${interfaceCode}
                         res.end();
                         return;
                     }
+
                     res.end(json);
                 } catch (e: any) {
                     const msg = e?.message || String(e);
@@ -173,18 +219,37 @@ ${interfaceCode}
 
         resolveId(id) {
             if (!exposeVirtualEnabled) return null;
-            if (id === virtualId) return virtualId;
-            return null;
+            return id === virtualId ? virtualId : null;
         },
 
+        /**
+         * Load virtual module: export version + checkVersion()
+         */
         load(id) {
             if (!exposeVirtualEnabled || id !== virtualId) return null;
 
             const json = command === "serve" ? buildJson() : lastJson;
+            const interfaceCode = generateAppVersionInterface(publicFields);
 
-            // Return proper JS module for Vite
+            // Note: checkVersion() fetches /version.json and compares with current version
             return {
-                code: `export default ${json};`,
+                code: `
+export default ${json};
+
+export async function checkVersion() {
+  try {
+    const res = await fetch("/${filename}", { cache: "no-store" });
+    if (!res.ok) return { updated: false, latest: null };
+    const latest = await res.json();
+    return {
+      updated: JSON.stringify(latest) !== JSON.stringify(${json}),
+      latest
+    };
+  } catch {
+    return { updated: false, latest: null };
+  }
+}
+        `,
                 map: null,
             };
         },
