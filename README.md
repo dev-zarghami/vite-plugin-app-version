@@ -42,7 +42,7 @@ import { generateVersion } from "vite-plugin-app-version";
 export default defineConfig({
   plugins: [
     generateVersion({
-      publicFilename: "version.json", // default
+      filename: "version.json", // default
       publicFields: ["pkgVersion", "version", "commitShort", "buildTime"], // default fields
       exposeVirtual: true // enables import from 'virtual:app-version'
     })
@@ -84,12 +84,13 @@ Example content:
 
 ## ⚙️ Options
 
-| Option            | Type                       | Default                                                   | Description |
-|-------------------|----------------------------|-----------------------------------------------------------|-------------|
-| `publicFilename`  | `string`                   | `"version.json"`                                          | Output file name |
-| `publicFields`    | `(keyof FullInfo)[]`       | `["pkgVersion","version","commitShort","buildTime"]`      | Fields to expose in JSON/virtual module |
-| `exposeVirtual`   | `boolean \| { id: string }`| `true` (exposes as `virtual:app-version`)                 | Export a virtual module |
-| `exposeVirtual.id`| `string`                   | `"virtual:app-version"`                                   | Custom virtual import ID |
+| Option            | Type                       | Default                                              | Description |
+|-------------------|----------------------------|------------------------------------------------------|-------------|
+| `filename`  | `string`                   | `"version.json"`                                     | Output file name |
+| `outputDir`              | `string \| false`            | `false`       | Mirror manifest file to disk (useful for static hosting) |
+| `publicFields`    | `(keyof FullInfo)[]`       | `["pkgVersion","version","commitShort","buildTime"]` | Fields to expose in JSON/virtual module |
+| `exposeVirtual`   | `boolean \| { id: string }`| `true` (exposes as `virtual:app-version`)            | Export a virtual module |
+| `exposeVirtual.id`| `string`                   | `"virtual:app-version"`                              | Custom virtual import ID |
 
 ### FullInfo fields
 

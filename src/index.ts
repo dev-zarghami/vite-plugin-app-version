@@ -2,8 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { Plugin, ResolvedConfig } from "vite";
-import { NOW_ISO, createLogger, resolveOutputPath, writeFileIfChanged, runCommand } from "./helper";
+import type {Plugin, ResolvedConfig} from "vite";
+import {NOW_ISO, createLogger, resolveOutputPath, writeFileIfChanged, runCommand} from "./helper";
 
 type FullInfo = {
     version: string;
@@ -14,8 +14,9 @@ type FullInfo = {
 };
 
 type Options = {
-    /** Output filename served at BASE/<publicFilename>. Default: "version.json" */
-    publicFilename?: string;
+    outputDir?: string,
+    /** Output filename served at BASE/<filename>. Default: "version.json" */
+    filename?: string;
     /** Which fields to expose publicly (JSON + virtual module) */
     publicFields?: (keyof FullInfo)[];
     /** Expose a virtual module you can import in-app. Default: true → 'virtual:app-version' */
@@ -62,7 +63,7 @@ function weakEtagFor(s: string) {
 
 export function generateVersion(opts: Options = {}): Plugin {
     const log = createLogger("version");
-    const publicFilename = opts.publicFilename ?? "version.json";
+    const filename = opts.filename ?? "version.json";
     const defaultFields: (keyof FullInfo)[] = ["pkgVersion", "version", "commitShort", "buildTime"];
     const publicFields = opts.publicFields ?? defaultFields;
 
@@ -71,7 +72,7 @@ export function generateVersion(opts: Options = {}): Plugin {
         ? exposeVirtualEnabled.id
         : "virtual:app-version";
 
-    let outDir = "dist";
+    let outDir = opts.outputDir || "static";
     let mode: "development" | "production" = "production";
     let command: "serve" | "build" = "build";
     let resolvedConfig: ResolvedConfig;
@@ -107,18 +108,18 @@ export function generateVersion(opts: Options = {}): Plugin {
             // emit file into build outDir
             try {
                 const json = buildJson();
-                const filePath = resolveOutputPath(outDir, publicFilename);
+                const filePath = resolveOutputPath(outDir, filename);
                 writeFileIfChanged(filePath, json, log);
-                log.info("version file written", { file: filePath });
+                log.info("version file written", {file: filePath});
             } catch (e: any) {
-                log.warn("failed to write version file", { err: e?.message || String(e) });
+                log.warn("failed to write version file", {err: e?.message || String(e)});
             }
         },
 
         // Dev: serve JSON at base-aware route with ETag/no-store
         configureServer(server) {
             const base = (resolvedConfig?.base ?? "/").replace(/\/+$/, "/");
-            const route = path.posix.join(base, publicFilename);
+            const route = path.posix.join(base, filename);
 
             server.middlewares.use(route, (req, res) => {
                 try {
@@ -141,7 +142,7 @@ export function generateVersion(opts: Options = {}): Plugin {
                 } catch (e: any) {
                     const msg = e?.message || String(e);
                     res.statusCode = 500;
-                    res.end(JSON.stringify({ error: msg }, null, 2));
+                    res.end(JSON.stringify({error: msg}, null, 2));
                 }
             });
 
