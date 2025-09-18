@@ -1,49 +1,65 @@
-// /vite/plugins/generate-version.ts
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type {Plugin, ResolvedConfig} from "vite";
-import {NOW_ISO, createLogger, resolveOutputPath, writeFileIfChanged, runCommand} from "./helper";
 
 /**
- * Full information about the app version
+ * Full version info collected at build time.
  */
 type FullInfo = {
-    version: string; // Git tag, commit hash or timestamp
+    version: string;       // Git tag, commit hash or timestamp
     commitShort: string | null;
-    pkgVersion: string | null; // package.json version
-    buildTime: string; // ISO timestamp
-    mode: string; // development | production
+    pkgVersion: string | null;
+    buildTime: string;     // ISO timestamp
+    mode: string;          // development | production
 };
 
-/**
- * Plugin options
- */
 type Options = {
-    outputDir?: string; // Where to write version.json
-    filename?: string; // Default: "version.json"
+    filename?: string; // default "version.json"
     publicFields?: (keyof FullInfo)[];
-    exposeVirtual?: boolean | { id?: string; dtsDir?: string }; // virtual module + TS declaration path
+    exposeVirtual?: boolean | { id?: string; dtsDir?: string };
 };
 
-// Default fields to expose in JSON & virtual module
-const defaultFields: (keyof FullInfo)[] = ["pkgVersion", "version", "commitShort", "buildTime"];
+// Default fields exposed in version.json + virtual module
+const defaultFields: (keyof FullInfo)[] = [
+    "pkgVersion",
+    "version",
+    "commitShort",
+    "buildTime",
+];
 
-/**
- * Read package.json version
- */
+const fieldTypes: Record<keyof FullInfo, string> = {
+    version: "string",
+    commitShort: "string | null",
+    pkgVersion: "string | null",
+    buildTime: "string",
+    mode: "string",
+};
+
+// --------------------- helpers ---------------------
+
+function runCommand(cmd: string): string | null {
+    try {
+        return require("child_process")
+            .execSync(cmd, {stdio: ["ignore", "pipe", "ignore"]})
+            .toString()
+            .trim();
+    } catch {
+        return null;
+    }
+}
+
 function readPkgVersion(): string | null {
     try {
-        const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"));
+        const pkg = JSON.parse(
+            fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"),
+        );
         return typeof pkg.version === "string" ? pkg.version : null;
     } catch {
         return null;
     }
 }
 
-/**
- * Collect version info from Git / package.json / timestamp
- */
 function collectVersion(mode: string): FullInfo {
     const version =
         runCommand("git describe --tags --exact-match") ||
@@ -57,75 +73,50 @@ function collectVersion(mode: string): FullInfo {
         version,
         commitShort,
         pkgVersion: readPkgVersion(),
-        buildTime: NOW_ISO(),
+        buildTime: new Date().toISOString(),
         mode,
     };
 }
 
-/**
- * Pick only selected keys from object
- */
-function pickFields<T extends Record<string, any>, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> {
+function pickFields<T extends Record<string, any>, K extends keyof T>(
+    obj: T,
+    keys: K[],
+): Pick<T, K> {
     const out = {} as Pick<T, K>;
     for (const k of keys) out[k] = obj[k];
     return out;
 }
 
-/**
- * Generate weak ETag for caching
- */
 function weakEtagFor(content: string) {
     const hash = crypto.createHash("sha1").update(content).digest("hex");
     return `W/"${hash}"`;
 }
 
-/**
- * Type mapping for generating TypeScript interface
- */
-const fieldTypes: Record<keyof FullInfo, string> = {
-    version: "string",
-    commitShort: "string | null",
-    pkgVersion: "string | null",
-    buildTime: "string",
-    mode: "string",
-};
-
-/**
- * Generate TypeScript interface code for selected fields
- */
-function generateAppVersionInterface(fields: (keyof FullInfo)[]): string {
-    const lines = fields.map(f => `  ${f}: ${fieldTypes[f]};`);
+function generateInterface(fields: (keyof FullInfo)[]): string {
+    const lines = fields.map((f) => `  ${f}: ${fieldTypes[f]};`);
     return `interface AppVersion {\n${lines.join("\n")}\n}`;
 }
 
-/**
- * Write .d.ts file to disk so TypeScript/IDE can resolve the virtual module.
- *
- * This function is safe to call multiple times; it will create the directory
- * if necessary and overwrite the declaration file.
- */
 function writeDtsToDisk(virtualId: string, interfaceCode: string, dtsDir: string) {
     if (!dtsDir) return;
     if (!fs.existsSync(dtsDir)) fs.mkdirSync(dtsDir, {recursive: true});
 
-    const dtsContent = `declare module "${virtualId}" {
+    const dtsContent =
+        `declare module "${virtualId}" {
 ${interfaceCode}
   const version: AppVersion;
   export function checkVersion(): Promise<{ updated: boolean; latest: AppVersion | null }>;
   export default version;
 }
-`.trim() + "\n";
+` + "\n";
 
     const outDtsPath = path.resolve(dtsDir, "virtual-app-version.d.ts");
     fs.writeFileSync(outDtsPath, dtsContent, "utf-8");
 }
 
-/**
- * Vite plugin: generate app version info
- */
-export function generateVersion(opts: Options = {}): Plugin {
-    const log = createLogger("version");
+// --------------------- plugin ---------------------
 
+export function generateVersion(opts: Options = {}): Plugin {
     const filename = opts.filename ?? "version.json";
     const publicFields = opts.publicFields ?? defaultFields;
 
@@ -138,18 +129,13 @@ export function generateVersion(opts: Options = {}): Plugin {
     const dtsDir =
         typeof exposeVirtualEnabled === "object" && exposeVirtualEnabled?.dtsDir
             ? exposeVirtualEnabled.dtsDir
-            : path.resolve(process.cwd(), "src/types"); // default TS declaration path
+            : path.resolve(process.cwd(), "src/types");
 
-    let outDir = opts.outputDir || "static";
-    let mode: "development" | "production" = "production";
-    let command: "serve" | "build" = "build";
     let resolvedConfig: ResolvedConfig;
-
+    let mode: string = "production";
+    let command: "serve" | "build" = "build";
     let lastJson = "{}\n";
 
-    /**
-     * Build JSON string for version info
-     */
     const buildJson = () => {
         const full = collectVersion(mode);
         const data = pickFields(full, publicFields);
@@ -162,61 +148,45 @@ export function generateVersion(opts: Options = {}): Plugin {
         name: "vite-plugin-app-version",
         apply: () => true,
 
-        /**
-         * configResolved is called early in the Vite lifecycle. We use it to:
-         * - capture resolved config (outDir, mode, command)
-         * - write the .d.ts to disk early so TypeScript/IDE can see it.
-         */
         configResolved(config) {
             resolvedConfig = config;
-            outDir = config.build?.outDir ?? outDir;
-            mode = (config.mode as "development" | "production") ?? "production";
-            command = (config.command as "serve" | "build") ?? "build";
+            mode = config.mode;
+            command = config.command as "serve" | "build";
 
-            // If virtual module is enabled, write .d.ts early so editors / TS server can pick it up.
             if (exposeVirtualEnabled) {
                 try {
-                    const interfaceCode = generateAppVersionInterface(publicFields);
-                    writeDtsToDisk(virtualId, interfaceCode, dtsDir);
-                    log.info("TypeScript declaration for virtual module written (early)", {file: path.resolve(dtsDir, "virtual-app-version.d.ts")});
-                } catch (e: any) {
-                    log.warn("failed to write early d.ts", {err: e?.message || String(e)});
+                    const iFace = generateInterface(publicFields);
+                    writeDtsToDisk(virtualId, iFace, dtsDir);
+                } catch {
+                    // ignore
                 }
             }
         },
 
         buildStart() {
-            // Build initial JSON so dev server / load() has something immediately.
-            buildJson();
+            buildJson(); // prepare initial json for dev + virtual module
         },
 
-        buildEnd() {
-            try {
-                const json = buildJson();
-                const filePath = resolveOutputPath(outDir, filename);
-                writeFileIfChanged(filePath, json, log);
-                log.info("version file written", {file: filePath});
+        generateBundle() {
+            const json = buildJson();
 
-                // Generate TS declaration file for virtual module (keeps it in sync after build)
-                if (exposeVirtualEnabled) {
-                    const interfaceCode = generateAppVersionInterface(publicFields);
+            // Emit into the final build output (works in all frameworks)
+            this.emitFile({
+                type: "asset",
+                fileName: filename,
+                source: json,
+            });
 
-                    // Ensure physical dts exists and is up-to-date
-                    try {
-                        writeDtsToDisk(virtualId, interfaceCode, dtsDir);
-                        log.info("TypeScript declaration for virtual module written (buildEnd)", {file: path.resolve(dtsDir, "virtual-app-version.d.ts")});
-                    } catch (e: any) {
-                        log.warn("failed to write version d.ts in buildEnd", {err: e?.message || String(e)});
-                    }
+            if (exposeVirtualEnabled) {
+                try {
+                    const iFace = generateInterface(publicFields);
+                    writeDtsToDisk(virtualId, iFace, dtsDir);
+                } catch {
+                    // ignore
                 }
-            } catch (e: any) {
-                log.warn("failed to write version file or d.ts", {err: e?.message || String(e)});
             }
         },
 
-        /**
-         * Serve version.json in dev server with proper caching headers
-         */
         configureServer(server) {
             const base = (resolvedConfig?.base ?? "/").replace(/\/+$/, "/");
             const route = path.posix.join(base, filename);
@@ -241,13 +211,10 @@ export function generateVersion(opts: Options = {}): Plugin {
 
                     res.end(json);
                 } catch (e: any) {
-                    const msg = e?.message || String(e);
                     res.statusCode = 500;
-                    res.end(JSON.stringify({error: msg}, null, 2));
+                    res.end(JSON.stringify({error: e?.message || String(e)}, null, 2));
                 }
             });
-
-            log.info(`dev route mounted → ${route} (no-store)`);
         },
 
         resolveId(id) {
@@ -255,18 +222,11 @@ export function generateVersion(opts: Options = {}): Plugin {
             return id === virtualId ? virtualId : null;
         },
 
-        /**
-         * Load virtual module: export version + checkVersion()
-         *
-         * Note: This provides the runtime module. The on-disk .d.ts file written
-         * in configResolved/buildEnd is what makes TypeScript/IDE recognize it.
-         */
         load(id) {
             if (!exposeVirtualEnabled || id !== virtualId) return null;
 
             const json = command === "serve" ? buildJson() : lastJson;
 
-            // Return JS module that exports the JSON and a runtime checkVersion()
             return {
                 code: `
 export default ${json};
@@ -290,3 +250,5 @@ export async function checkVersion() {
         },
     };
 }
+
+export default generateVersion;

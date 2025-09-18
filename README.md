@@ -81,7 +81,7 @@ setInterval(async () => {
 ### From `version.json`
 
 - **Dev mode**: available at `http://localhost:5173/version.json`
-- **Build mode**: emitted to your `dist/` (or configured `outDir`)
+- **Build mode**: emitted to your `/dist` or `/public` 
 
 Example content:
 
@@ -101,7 +101,6 @@ Example content:
 | Option                 | Type                                         | Default                                              | Description                                         |
 |------------------------|----------------------------------------------|------------------------------------------------------|-----------------------------------------------------|
 | `filename`             | `string`                                     | `"version.json"`                                     | Output file name                                    |
-| `outputDir`            | `string`                                     | `"dist"`                                             | Directory to emit JSON / virtual module declaration |
 | `publicFields`         | `(keyof FullInfo)[]`                         | `["pkgVersion","version","commitShort","buildTime"]` | Fields to expose in JSON and virtual module         |
 | `exposeVirtual`        | `boolean \| { id: string; dtsDir?: string }` | `true`                                               | Export a virtual module                             |
 | `exposeVirtual.id`     | `string`                                     | `"virtual:app-version"`                              | Custom virtual import ID                            |
