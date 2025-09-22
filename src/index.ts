@@ -100,18 +100,41 @@ function generateInterface(
     const lines = fields.map((f) => `  ${f}: ${fieldTypes[f]};`);
     if (extraFields) {
         for (const [key, val] of Object.entries(extraFields)) {
-            let tsType = typeof val;
-            if (tsType === "object") {
-                tsType = "Record<string, any>";
+            let tsType: string;
+            switch (typeof val) {
+                case "string":
+                    tsType = "string";
+                    break;
+                case "number":
+                    tsType = "number";
+                    break;
+                case "boolean":
+                    tsType = "boolean";
+                    break;
+                case "bigint":
+                    tsType = "bigint";
+                    break;
+                case "function":
+                    tsType = "Function";
+                    break;
+                case "object":
+                    tsType = val === null ? "null" : "Record<string, any>";
+                    break;
+                case "undefined":
+                    tsType = "undefined";
+                    break;
+                case "symbol":
+                    tsType = "symbol";
+                    break;
+                default:
+                    tsType = "any";
             }
-            if (tsType === "number") tsType = "number";
-            if (tsType === "boolean") tsType = "boolean";
-            if (tsType === "string") tsType = "string";
             lines.push(`  ${key}: ${tsType};`);
         }
     }
     return `interface AppVersion {\n${lines.join("\n")}\n}`;
 }
+
 
 function writeDtsToDisk(
     virtualId: string,
