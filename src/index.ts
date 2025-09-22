@@ -7,17 +7,18 @@ import type {Plugin, ResolvedConfig} from "vite";
  * Full version info collected at build time.
  */
 type FullInfo = {
-    version: string;       // Git tag, commit hash or timestamp
+    version: string;
     commitShort: string | null;
     pkgVersion: string | null;
-    buildTime: string;     // ISO timestamp
-    mode: string;          // development | production
+    buildTime: string;
+    mode: string;
 };
 
-type Options = {
+type Options<Extra extends Record<string, any> = {}> = {
     filename?: string; // default "version.json"
     publicFields?: (keyof FullInfo)[];
-    exposeVirtual?: boolean | { id?: string; dtsDir?: string };
+    exposeVirtual?: boolean;
+    extraFields?: Extra;
 };
 
 // Default fields exposed in version.json + virtual module
@@ -92,8 +93,24 @@ function weakEtagFor(content: string) {
     return `W/"${hash}"`;
 }
 
-function generateInterface(fields: (keyof FullInfo)[]): string {
+function generateInterface(
+    fields: (keyof FullInfo)[],
+    extraFields?: Record<string, any>
+): string {
     const lines = fields.map((f) => `  ${f}: ${fieldTypes[f]};`);
+    if (extraFields) {
+        for (const [key, val] of Object.entries(extraFields)) {
+            let tsType = typeof val;
+            if (tsType === "object") {
+                // @ts-ignore
+                tsType = "Record<string, any>";
+            }
+            if (tsType === "number") tsType = "number";
+            if (tsType === "boolean") tsType = "boolean";
+            if (tsType === "string") tsType = "string";
+            lines.push(`  ${key}: ${tsType};`);
+        }
+    }
     return `interface AppVersion {\n${lines.join("\n")}\n}`;
 }
 
@@ -119,26 +136,24 @@ ${interfaceCode}
 export function generateVersion(opts: Options = {}): Plugin {
     const filename = opts.filename ?? "version.json";
     const publicFields = opts.publicFields ?? defaultFields;
+    const extraFields = opts.extraFields ?? {};
 
     const exposeVirtualEnabled = opts.exposeVirtual ?? true;
-    const virtualId =
-        typeof exposeVirtualEnabled === "object" && exposeVirtualEnabled?.id
-            ? exposeVirtualEnabled.id
-            : "virtual:app-version";
-
-    const dtsDir =
-        typeof exposeVirtualEnabled === "object" && exposeVirtualEnabled?.dtsDir
-            ? exposeVirtualEnabled.dtsDir
-            : path.resolve(process.cwd(), "src/types");
+    const virtualId = "virtual:app-version";
+    const dtsDir = path.resolve(process.cwd(), "src");
 
     let resolvedConfig: ResolvedConfig;
     let mode: string = "production";
     let command: "serve" | "build" = "build";
     let lastJson = "{}\n";
+    let devJson: string = "{}\n";
 
     const buildJson = () => {
         const full = collectVersion(mode);
-        const data = pickFields(full, publicFields);
+        const data = {
+            ...pickFields(full, publicFields),
+            ...extraFields,
+        };
         const json = JSON.stringify(data, null, 2) + "\n";
         lastJson = json;
         return json;
@@ -155,7 +170,7 @@ export function generateVersion(opts: Options = {}): Plugin {
 
             if (exposeVirtualEnabled) {
                 try {
-                    const iFace = generateInterface(publicFields);
+                    const iFace = generateInterface(publicFields, extraFields);
                     writeDtsToDisk(virtualId, iFace, dtsDir);
                 } catch {
                     // ignore
@@ -164,13 +179,15 @@ export function generateVersion(opts: Options = {}): Plugin {
         },
 
         buildStart() {
-            buildJson(); // prepare initial json for dev + virtual module
+            const json = buildJson();
+            if (command === "serve") {
+                devJson = json;
+            }
         },
 
         generateBundle() {
             const json = buildJson();
 
-            // Emit into the final build output (works in all frameworks)
             this.emitFile({
                 type: "asset",
                 fileName: filename,
@@ -179,7 +196,7 @@ export function generateVersion(opts: Options = {}): Plugin {
 
             if (exposeVirtualEnabled) {
                 try {
-                    const iFace = generateInterface(publicFields);
+                    const iFace = generateInterface(publicFields, extraFields);
                     writeDtsToDisk(virtualId, iFace, dtsDir);
                 } catch {
                     // ignore
@@ -193,7 +210,7 @@ export function generateVersion(opts: Options = {}): Plugin {
 
             server.middlewares.use(route, (req, res) => {
                 try {
-                    const json = buildJson();
+                    const json = command === "serve" ? devJson : buildJson();
                     const etag = weakEtagFor(json);
 
                     res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -225,7 +242,7 @@ export function generateVersion(opts: Options = {}): Plugin {
         load(id) {
             if (!exposeVirtualEnabled || id !== virtualId) return null;
 
-            const json = command === "serve" ? buildJson() : lastJson;
+            const json = command === "serve" ? devJson : lastJson;
 
             return {
                 code: `
@@ -233,7 +250,7 @@ export default ${json};
 
 export async function checkVersion() {
   try {
-    const res = await fetch("/${filename}", { cache: "no-store" });
+    const res = await fetch("${resolvedConfig?.base ?? "/"}${filename}", { cache: "no-store" });
     if (!res.ok) return { updated: false, latest: null };
     const latest = await res.json();
     return {

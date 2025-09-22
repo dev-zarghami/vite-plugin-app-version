@@ -14,10 +14,10 @@
 - Generates a `version.json` file at build time
 - Serves `version.json` in **dev mode** with `Cache-Control: no-store` + ETag
 - Provides a virtual module (`virtual:app-version`) you can import in-app
-- **Dynamic TypeScript interface** for virtual module, matching `publicFields`
+- **Dynamic TypeScript interface** for virtual module, matching `publicFields` and `extraFields`
 - Exported async function `checkVersion()` to detect runtime version updates
 - Includes `pkgVersion`, `git tag/commit`, `buildTime`, and current `mode`
-- Customizable public fields
+- Customizable public fields and **extra custom fields**
 - No external runtime dependency
 
 ---
@@ -47,7 +47,12 @@ export default defineConfig({
         generateVersion({
             filename: "version.json", // default
             publicFields: ["pkgVersion", "version", "commitShort", "buildTime"], // default fields
-            exposeVirtual: true // enables import from 'virtual:app-version'
+            exposeVirtual: true, // enables import from 'virtual:app-version'
+            extraFields: {       // 👈 you can add custom fields too
+                env: process.env.NODE_ENV,
+                apiUrl: "https://api.example.com",
+                release: 42
+            }
         })
     ]
 });
@@ -59,12 +64,15 @@ export default defineConfig({
 import version, {checkVersion} from "virtual:app-version";
 
 console.log("App version info:", version);
-// Example output based on publicFields:
+// Example output:
 // {
 //   pkgVersion: "0.1.0",
 //   version: "v1.2.3",
 //   commitShort: "abc1234",
-//   buildTime: "2025-09-09T14:00:00.000Z"
+//   buildTime: "2025-09-09T14:00:00.000Z",
+//   env: "development",
+//   apiUrl: "https://api.example.com",
+//   release: 42
 // }
 
 // Check for runtime updates
@@ -76,12 +84,12 @@ setInterval(async () => {
 }, 30000); // check every 30 seconds
 ```
 
-- The **TypeScript interface** `AppVersion` automatically matches the fields you expose via `publicFields`.
+- The **TypeScript interface** `AppVersion` automatically includes the fields from `publicFields` and `extraFields`.
 
 ### From `version.json`
 
 - **Dev mode**: available at `http://localhost:5173/version.json`
-- **Build mode**: emitted to your `/dist` or `/public` 
+- **Build mode**: emitted to your `/dist` or `/public`
 
 Example content:
 
@@ -90,7 +98,10 @@ Example content:
   "pkgVersion": "0.1.0",
   "version": "v1.2.3",
   "commitShort": "abc1234",
-  "buildTime": "2025-09-09T14:00:00.000Z"
+  "buildTime": "2025-09-09T14:00:00.000Z",
+  "env": "development",
+  "apiUrl": "https://api.example.com",
+  "release": 42
 }
 ```
 
@@ -98,13 +109,12 @@ Example content:
 
 ## ⚙️ Options
 
-| Option                 | Type                                         | Default                                              | Description                                         |
-|------------------------|----------------------------------------------|------------------------------------------------------|-----------------------------------------------------|
-| `filename`             | `string`                                     | `"version.json"`                                     | Output file name                                    |
-| `publicFields`         | `(keyof FullInfo)[]`                         | `["pkgVersion","version","commitShort","buildTime"]` | Fields to expose in JSON and virtual module         |
-| `exposeVirtual`        | `boolean \| { id: string; dtsDir?: string }` | `true`                                               | Export a virtual module                             |
-| `exposeVirtual.id`     | `string`                                     | `"virtual:app-version"`                              | Custom virtual import ID                            |
-| `exposeVirtual.dtsDir` | `string`                                     | `"src/types"`                                        | Path to write TypeScript declaration                |
+| Option          | Type                   | Default                                              | Description                                         |
+|-----------------|------------------------|------------------------------------------------------|-----------------------------------------------------|
+| `filename`      | `string`               | `"version.json"`                                     | Output file name                                    |
+| `publicFields`  | `(keyof FullInfo)[]`   | `["pkgVersion","version","commitShort","buildTime"]` | Fields to expose in JSON and virtual module         |
+| `exposeVirtual` | `boolean`              | `true`                                               | Enable the virtual module import (`virtual:app-version`) |
+| `extraFields`   | `Record<string, any>`  | `{}`                                                 | Extra custom fields to merge into JSON and typings  |
 
 ### FullInfo fields
 
@@ -118,22 +128,19 @@ type FullInfo = {
 };
 ```
 
-> Only the fields listed in `publicFields` appear in the virtual module and JSON file. The **TypeScript interface**
-> automatically matches these fields.
-
 ---
 
-## 🛠️ Example: Custom Virtual ID & fields
+## 🛠️ Example: Only version + buildTime
 
 ```ts
 generateVersion({
     publicFields: ["version", "buildTime"],
-    exposeVirtual: {id: "virtual:my-build-info"}
+    exposeVirtual: true
 });
 ```
 
 ```ts
-import info, {checkVersion} from "virtual:my-build-info";
+import info, {checkVersion} from "virtual:app-version";
 
 console.log(info.buildTime); // TS autocomplete works
 
@@ -142,8 +149,6 @@ checkVersion().then(({updated, latest}) => {
     if (updated) console.log("New version available:", latest?.version);
 });
 ```
-
-- The generated `AppVersion` interface will only contain `version` and `buildTime`.
 
 ---
 
