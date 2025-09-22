@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-app-version",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Vite plugin to generate an app version file (version.json) and optional virtual module with git/tag/build metadata.",
   "keywords": [
     "vite",

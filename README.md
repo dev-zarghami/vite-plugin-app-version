@@ -16,6 +16,7 @@
 - Provides a virtual module (`virtual:app-version`) you can import in-app
 - **Dynamic TypeScript interface** for virtual module, matching `publicFields` and `extraFields`
 - Exported async function `checkVersion()` to detect runtime version updates
+- Exported subscription function `onCheck(cb)` to listen for results of `checkVersion()`
 - Includes `pkgVersion`, `git tag/commit`, `buildTime`, and current `mode`
 - Customizable public fields and **extra custom fields**
 - No external runtime dependency
@@ -61,30 +62,27 @@ export default defineConfig({
 ### In your app (frontend code)
 
 ```ts
-import version, {checkVersion} from "virtual:app-version";
+import version, {checkVersion, onCheck} from "virtual:app-version";
 
 console.log("App version info:", version);
-// Example output:
-// {
-//   pkgVersion: "0.1.0",
-//   version: "v1.2.3",
-//   commitShort: "abc1234",
-//   buildTime: "2025-09-09T14:00:00.000Z",
-//   env: "development",
-//   apiUrl: "https://api.example.com",
-//   release: 42
-// }
 
-// Check for runtime updates
-setInterval(async () => {
-    const {updated, latest} = await checkVersion();
+// Subscribe to every check
+onCheck(({updated, latest}) => {
     if (updated) {
-        alert(`New app version detected: ${latest?.version}`);
+        console.log("🔄 New version available:", latest?.version);
+    } else {
+        console.log("✅ Still up to date");
     }
-}, 30000); // check every 30 seconds
+});
+
+// Run a check manually
+setInterval(() => {
+    checkVersion(); // triggers onCheck listeners
+}, 30000);
 ```
 
 - The **TypeScript interface** `AppVersion` automatically includes the fields from `publicFields` and `extraFields`.
+- `onCheck` returns an unsubscribe function if you want to remove the listener.
 
 ### From `version.json`
 
@@ -140,14 +138,18 @@ generateVersion({
 ```
 
 ```ts
-import info, {checkVersion} from "virtual:app-version";
+import info, {checkVersion, onCheck} from "virtual:app-version";
 
 console.log(info.buildTime); // TS autocomplete works
 
-// Runtime version check
-checkVersion().then(({updated, latest}) => {
-    if (updated) console.log("New version available:", latest?.version);
+onCheck((res) => {
+    if (res.updated) {
+        console.log("New version available:", res.latest?.version);
+    }
 });
+
+// Runtime version check
+checkVersion();
 ```
 
 ---

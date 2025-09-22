@@ -53,7 +53,7 @@ function runCommand(cmd: string): string | null {
 function readPkgVersion(): string | null {
     try {
         const pkg = JSON.parse(
-            fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"),
+            fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8")
         );
         return typeof pkg.version === "string" ? pkg.version : null;
     } catch {
@@ -81,7 +81,7 @@ function collectVersion(mode: string): FullInfo {
 
 function pickFields<T extends Record<string, any>, K extends keyof T>(
     obj: T,
-    keys: K[],
+    keys: K[]
 ): Pick<T, K> {
     const out = {} as Pick<T, K>;
     for (const k of keys) out[k] = obj[k];
@@ -102,7 +102,6 @@ function generateInterface(
         for (const [key, val] of Object.entries(extraFields)) {
             let tsType = typeof val;
             if (tsType === "object") {
-                // @ts-ignore
                 tsType = "Record<string, any>";
             }
             if (tsType === "number") tsType = "number";
@@ -114,7 +113,11 @@ function generateInterface(
     return `interface AppVersion {\n${lines.join("\n")}\n}`;
 }
 
-function writeDtsToDisk(virtualId: string, interfaceCode: string, dtsDir: string) {
+function writeDtsToDisk(
+    virtualId: string,
+    interfaceCode: string,
+    dtsDir: string
+) {
     if (!dtsDir) return;
     if (!fs.existsSync(dtsDir)) fs.mkdirSync(dtsDir, {recursive: true});
 
@@ -123,6 +126,7 @@ function writeDtsToDisk(virtualId: string, interfaceCode: string, dtsDir: string
 ${interfaceCode}
   const version: AppVersion;
   export function checkVersion(): Promise<{ updated: boolean; latest: AppVersion | null }>;
+  export function onCheck(cb: (result: { updated: boolean; latest: AppVersion | null }) => void): () => void;
   export default version;
 }
 ` + "\n";
@@ -214,7 +218,10 @@ export function generateVersion(opts: Options = {}): Plugin {
                     const etag = weakEtagFor(json);
 
                     res.setHeader("Content-Type", "application/json; charset=utf-8");
-                    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+                    res.setHeader(
+                        "Cache-Control",
+                        "no-store, no-cache, must-revalidate, max-age=0"
+                    );
                     res.setHeader("Pragma", "no-cache");
                     res.setHeader("Expires", "0");
                     res.setHeader("Vary", "If-None-Match");
@@ -248,17 +255,41 @@ export function generateVersion(opts: Options = {}): Plugin {
                 code: `
 export default ${json};
 
+let listeners = [];
+
+/**
+ * Subscribe to version checks
+ * @param {(result: {updated: boolean, latest: any}) => void} cb
+ * @returns {() => void} unsubscribe function
+ */
+export function onCheck(cb) {
+  if (typeof cb === "function") {
+    listeners.push(cb);
+  }
+  return () => {
+    listeners = listeners.filter(fn => fn !== cb);
+  };
+}
+
 export async function checkVersion() {
   try {
     const res = await fetch("${resolvedConfig?.base ?? "/"}${filename}", { cache: "no-store" });
-    if (!res.ok) return { updated: false, latest: null };
+    if (!res.ok) {
+      const result = { updated: false, latest: null };
+      listeners.forEach(fn => fn(result));
+      return result;
+    }
     const latest = await res.json();
-    return {
+    const result = {
       updated: JSON.stringify(latest) !== JSON.stringify(${json}),
       latest
     };
+    listeners.forEach(fn => fn(result));
+    return result;
   } catch {
-    return { updated: false, latest: null };
+    const result = { updated: false, latest: null };
+    listeners.forEach(fn => fn(result));
+    return result;
   }
 }
         `,
