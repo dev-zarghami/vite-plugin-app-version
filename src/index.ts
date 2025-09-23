@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type {Plugin, ResolvedConfig} from "vite";
+import {execSync} from "node:child_process";
 
 /**
  * Full version info collected at build time.
@@ -41,8 +42,7 @@ const fieldTypes: Record<keyof FullInfo, string> = {
 
 function runCommand(cmd: string): string | null {
     try {
-        return require("child_process")
-            .execSync(cmd, {stdio: ["ignore", "pipe", "ignore"]})
+        return execSync(cmd, {stdio: ["ignore", "pipe", "ignore"], cwd: process.cwd()})
             .toString()
             .trim();
     } catch {
